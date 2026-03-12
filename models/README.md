@@ -1,0 +1,75 @@
+# BiSeNet Face Parsing Model Setup
+
+The skin quality analysis is enhanced when a BiSeNet face parsing ONNX model is present.
+Without it, the system falls back to LBP texture analysis on the landmark-bounded face
+region, which still works well. With BiSeNet, the analysis is restricted to actual skin
+pixels only, eliminating noise from eyebrows, lips, eyes, and hair.
+
+## How to get the model
+
+### Option A: Download a pre-converted ONNX model
+
+Search HuggingFace for "face-parsing BiSeNet ONNX" — several community-exported models exist.
+The model should:
+- Accept input shape `[1, 3, 512, 512]` (CHW, float32, ImageNet-normalized)
+- Output shape `[1, 19, 512, 512]` (19-class segmentation)
+
+Place the file as `face_parsing.onnx` in this `models/` directory.
+
+### Option B: Convert from PyTorch yourself
+
+1. Clone the source repo:
+   ```bash
+   git clone https://github.com/zllrunning/face-parsing.PyTorch
+   cd face-parsing.PyTorch
+   ```
+
+2. Download pretrained weights:
+   - `79999_iter.pth` from the repo's release/README links
+
+3. Run conversion:
+   ```python
+   import torch
+   from model import BiSeNet
+
+   net = BiSeNet(n_classes=19)
+   net.load_state_dict(torch.load('79999_iter.pth', map_location='cpu'))
+   net.eval()
+
+   dummy = torch.randn(1, 3, 512, 512)
+   torch.onnx.export(
+       net, dummy, 'face_parsing.onnx',
+       input_names=['input'],
+       output_names=['output'],
+       opset_version=11,
+       dynamic_axes=None
+   )
+   ```
+
+4. Copy `face_parsing.onnx` into this `models/` directory.
+
+## Class labels (19 classes)
+
+| Index | Label          |
+|-------|----------------|
+| 0     | Background     |
+| 1     | Face skin      |
+| 2     | Left eyebrow   |
+| 3     | Right eyebrow  |
+| 4     | Left eye       |
+| 5     | Right eye      |
+| 6     | Eyeglasses     |
+| 7     | Left ear       |
+| 8     | Right ear      |
+| 9     | Earring        |
+| 10    | Nose           |
+| 11    | Mouth interior |
+| 12    | Upper lip      |
+| 13    | Lower lip      |
+| 14    | Neck           |
+| 15    | Necklace       |
+| 16    | Cloth          |
+| 17    | Hair           |
+| 18    | Hat            |
+
+Classes 1 (face skin) and 10 (nose) are used as the skin mask.
