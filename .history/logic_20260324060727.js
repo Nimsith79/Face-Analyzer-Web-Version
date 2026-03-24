@@ -558,26 +558,23 @@ export function generateFacialResults(faceLandmarks, faceBlendshapes, skinAnalys
   ).toFixed(2));
 
   // ====== Labels ======
-  const jawline    = scoreToLabel(jawlineStrength,  0.72, 0.48, "Strong & defined", "Moderate", "Can be improved");
-  const cheekbones = scoreToLabel(cheekboneStrength, 0.70, 0.45, "Prominent", "Moderate", "Less defined");
-  const lips       = scoreToLabel(lipScore,          0.70, 0.45, "Well-defined", "Average", "Can be improved");
-  const brows      = scoreToLabel(browDefinition,    0.68, 0.42, "Strong & arched", "Moderate", "Can be improved");
+  const jawline = scoreToLabel(jawlineStrength, 0.7, 0.45, "Strong", "Good", "Can be improved");
+  const cheekbones = scoreToLabel(cheekboneStrength, 0.7, 0.45, "Prominent", "Good", "Can be improved");
+  const lips = scoreToLabel(lipScore, 0.72, 0.45, "Balanced", "Slightly uneven", "Needs improvement");
+  const brows = scoreToLabel(browDefinition, 0.7, 0.4, "Strong", "Moderate", "Can be improved");
 
   let eyeShape = "Neutral canthal tilt";
-  if (canthalNormalized > 0.040) eyeShape = "Strong positive tilt";
-  else if (canthalNormalized > 0.018) eyeShape = "Positive canthal tilt";
-  else if (canthalNormalized < -0.012) eyeShape = "Negative canthal tilt";
+  if (canthalNormalized > 0.018) eyeShape = "Positive canthal tilt";
+  if (canthalNormalized < -0.012) eyeShape = "Negative canthal tilt";
 
   let noseShape = "Proportionate";
-  if (noseRatio > 0.240) noseShape = "Broad relative to face";
-  else if (noseRatio < 0.155) noseShape = "Narrow relative to face";
-  if (g.noseLengthRatio > 0.330) noseShape += " · Long bridge";
-  else if (g.noseLengthRatio < 0.215) noseShape += " · Short bridge";
+  if (noseRatio > 0.245) noseShape = "Broad relative to face";
+  if (noseRatio < 0.16) noseShape = "Narrow relative to face";
 
   let facialSymmetry = "Average";
-  if (symmetryScore >= 0.91) facialSymmetry = "High";
-  else if (symmetryScore >= 0.82) facialSymmetry = "Above average";
-  else if (symmetryScore < 0.65) facialSymmetry = "Can be improved";
+  if (symmetryScore >= 0.82) facialSymmetry = "Above average";
+  if (symmetryScore >= 0.92) facialSymmetry = "High";
+  if (symmetryScore < 0.65) facialSymmetry = "Can be improved";
 
   let puffiness = "Low";
   if (puffinessScore >= 0.55) puffiness = "Noticeable";
@@ -587,20 +584,20 @@ export function generateFacialResults(faceLandmarks, faceBlendshapes, skinAnalys
   if (!skinAnalysis) skinQuality = "Approximate (no pixel data)";
   else if (skinQualityScore >= 0.75) skinQuality = "Clear";
   else if (skinQualityScore >= 0.55) skinQuality = "Good";
-  else if (skinQualityScore < 0.38) skinQuality = "Can be improved";
+  else if (skinQualityScore < 0.40) skinQuality = "Can be improved";
 
-  // ====== Overall score (calibrated weights) ======
+  // ====== Overall score ======
   const overallScoreValue = Math.round(clamp(
-    0.14 * asPercent(jawlineStrength)  +
+    0.13 * asPercent(jawlineStrength) +
     0.13 * asPercent(cheekboneStrength) +
-    0.10 * asPercent(lipScore)         +
-    0.08 * asPercent(browDefinition)   +
-    0.09 * asPercent(eyeShapeScore)    +
-    0.08 * asPercent(noseShapeScore)   +
-    0.16 * asPercent(symmetryScore)    +
-    0.09 * asPercent(puffinessClarity) +
+    0.10 * asPercent(lipScore) +
+    0.08 * asPercent(browDefinition) +
+    0.08 * asPercent(eyeShapeScore) +
+    0.08 * asPercent(noseShapeScore) +
+    0.15 * asPercent(symmetryScore) +
+    0.10 * asPercent(puffinessClarity) +
     0.08 * asPercent(skinQualityScore) +
-    0.05 * scanQuality,
+    0.07 * scanQuality,
     0, 100
   ));
 

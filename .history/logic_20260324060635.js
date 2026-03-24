@@ -461,58 +461,35 @@ export function generateFacialResults(faceLandmarks, faceBlendshapes, skinAnalys
     0, 1
   );
 
-  // ====== Structural metrics (landmark geometry) ======
-  // Symmetry: both horizontal (x) and vertical (y) deviations, already normalized
-  const symmetryScore = clamp(1 - g.asymmetry * 7 - g.asymmetryY * 3, 0, 1);
+  // ====== Structural metrics (landmark geometry only) ======
+  const symmetryScore = clamp(1 - (g.asymmetry / Math.max(g.faceWidth, 1e-5)) * 8, 0, 1);
   const canthalNormalized = g.canthalTilt / Math.max(g.eyeDistance, 1e-5);
   const noseRatio = g.noseWidth / Math.max(g.faceWidth, 1e-5);
 
-  // ── Jawline ──────────────────────────────────────────────────────────────
-  // Three sub-scores: width ratio + gonial angle sharpness + V-taper
+  // Jawline (geometry only)
   const jawRatio = g.jawWidth / Math.max(g.faceWidth, 1e-5);
-  const jawWidthScore  = clamp(1 - Math.abs(jawRatio - 0.65) * 4.5, 0, 1);
-  // Ideal gonial angle ≈ 120–130° (2.09–2.27 rad); sharper jaw → lower angle
-  const gonialScore    = clamp(1 - Math.abs(g.avgGonialAngle - 2.18) * 1.8, 0, 1);
-  // Jaw taper: chin ~58–66% of jaw width = tapered V-shape
-  const taperScore     = clamp(1 - Math.abs(g.jawTaper - 0.62) * 3.5, 0, 1);
-  const jawlineStrength = jawWidthScore * 0.35 + gonialScore * 0.40 + taperScore * 0.25;
+  const faceRatio = g.faceHeight / Math.max(g.faceWidth, 1e-5);
+  const jawlineStrength = clamp((jawRatio - 0.58) * 2.5 + (faceRatio - 1.2) * 0.5, 0, 1);
 
-  // ── Cheekbones ───────────────────────────────────────────────────────────
-  // Three sub-scores: cheek/jaw ratio + cheek/face ratio + z-axis protrusion
-  const cheekRatio     = g.cheekWidth / Math.max(g.jawWidth,  1e-5);
+  // Cheekbones (geometry only)
+  const cheekRatio = g.cheekWidth / Math.max(g.jawWidth, 1e-5);
   const cheekFaceRatio = g.cheekWidth / Math.max(g.faceWidth, 1e-5);
-  const cheekRatioScore    = clamp((cheekRatio     - 0.86) * 3.5, 0, 1);
-  const cheekFaceScore     = clamp((cheekFaceRatio - 0.72) * 5.0, 0, 1);
-  // z-protrusion: small positive value in normalized coords → cheeks protrude over jaw
-  const cheekProtScore     = clamp(g.cheekProtrusion * 28 + 0.35, 0, 1);
-  const cheekboneStrength = cheekRatioScore * 0.40 + cheekFaceScore * 0.35 + cheekProtScore * 0.25;
+  const cheekboneStrength = clamp((cheekRatio - 0.88) * 2.5 + (cheekFaceRatio - 0.75) * 2.0, 0, 1);
 
-  // ── Lips ─────────────────────────────────────────────────────────────────
-  // Four sub-scores: upper/lower ratio + fullness + corner symmetry + Cupid's bow
-  const lipRatioScore    = clamp(1 - Math.abs(g.lipRatio - 0.65) * 3.2, 0, 1);
-  const lipFullnessScore = clamp((g.lipFullness - 0.05) * 8, 0, 1);
-  const lipSymmetryScore = clamp(1 - (g.lipCornerAsymmetry / Math.max(g.faceHeight, 1e-5)) * 28, 0, 1);
-  // Cupid's bow: positive value (center sits lower than peaks) normalized by face height
-  const cupidsBowScore   = clamp((g.cupidsBow / Math.max(g.faceHeight, 1e-5)) * 38, 0, 1);
-  const lipScore = lipRatioScore * 0.28 + lipFullnessScore * 0.28 + lipSymmetryScore * 0.24 + cupidsBowScore * 0.20;
+  // Lips (geometry: fullness, upper-to-lower ratio, corner symmetry)
+  const idealLipRatio = 0.55;
+  const lipRatioScore = clamp(1 - Math.abs(g.lipRatio - idealLipRatio) * 2.5, 0, 1);
+  const lipFullnessScore = clamp((g.lipFullness - 0.04) * 7, 0, 1);
+  const lipSymmetryScore = clamp(1 - (g.lipCornerAsymmetry / Math.max(g.faceHeight, 1e-5)) * 30, 0, 1);
+  const lipScore = lipRatioScore * 0.35 + lipFullnessScore * 0.35 + lipSymmetryScore * 0.30;
 
-  // ── Brows ─────────────────────────────────────────────────────────────────
-  // Five sub-scores: eye-gap + arch + thickness + length + tail lift
-  const browEyeNorm  = g.browEyeDistance / Math.max(g.faceHeight, 1e-5);
-  const browArchNorm = g.browArch        / Math.max(g.faceHeight, 1e-5);
-  const browThickNorm = g.browThickness  / Math.max(g.faceHeight, 1e-5);
-  const browLenNorm   = g.avgBrowLength  / Math.max(g.faceWidth,  1e-5);
-  // Ideal brow-eye gap ≈ 3.4% of face height; penalise both too close and too far
-  const browDistScore   = clamp(1 - Math.abs(browEyeNorm - 0.034) * 15, 0, 1);
-  const browArchScore   = clamp(browArchNorm * 22, 0, 1);
-  const browThickScore  = clamp((browThickNorm - 0.012) * 35, 0, 1);
-  // Ideal brow length ≈ 28–36% of face width
-  const browLengthScore = clamp(1 - Math.abs(browLenNorm - 0.32) * 8, 0, 1);
-  // Positive browLift = tail is higher than head (lateral lift; aesthetically favourable)
-  const browLiftScore   = clamp(g.browLift * 18 + 0.55, 0, 1);
-  const browDefinition = browDistScore * 0.22 + browArchScore * 0.22 + browThickScore * 0.20 + browLengthScore * 0.20 + browLiftScore * 0.16;
+  // Brows (geometry: brow-eye gap, arch height, thickness)
+  const browEyeNorm = g.browEyeDistance / Math.max(g.faceHeight, 1e-5);
+  const browArchNorm = g.browArch / Math.max(g.faceHeight, 1e-5);
+  const browThickNorm = g.browThickness / Math.max(g.faceHeight, 1e-5);
+  const browDefinition = clamp((browEyeNorm - 0.02) * 12 + browArchNorm * 15 + browThickNorm * 8, 0, 1);
 
-  // ── Puffiness ──────────────────────────────────────────────────────────────
+  // Puffiness (geometry z-depth + optional pixel under-eye darkness)
   const geometryPuffClarity = clamp(0.5 + g.underEyeZDiff * 8 + (g.underEyeRatio - 0.5) * 1.5, 0, 1);
   const pixelPuff = skinAnalysis ? skinAnalysis.underEyeDarkness : 0;
   const puffinessClarity = skinAnalysis
@@ -520,64 +497,45 @@ export function generateFacialResults(faceLandmarks, faceBlendshapes, skinAnalys
     : geometryPuffClarity;
   const puffinessScore = 1 - puffinessClarity;
 
-  // ── Eye shape ──────────────────────────────────────────────────────────────
-  // Three sub-scores: canthal tilt direction + Eye Aspect Ratio (almond shape) + inner-canthus spacing
-  const canthalScore = clamp(1 - Math.abs(canthalNormalized - 0.022) * 16, 0, 1);
-  // Almond-shaped eye: EAR ideal ≈ 0.26–0.32
-  const earScore     = clamp(1 - Math.abs(g.avgEyeAR - 0.29) * 10, 0, 1);
-  // Inner-canthus distance as fraction of face width: ideal ≈ 0.28–0.33
-  const icRatio      = g.icDistance / Math.max(g.faceWidth, 1e-5);
-  const icScore      = clamp(1 - Math.abs(icRatio - 0.305) * 9, 0, 1);
-  const eyeShapeScore = canthalScore * 0.45 + earScore * 0.35 + icScore * 0.20;
+  // Eye shape
+  const eyeShapeScore = clamp(1 - Math.abs(canthalNormalized - 0.02) * 18, 0, 1);
 
-  // ── Nose shape ─────────────────────────────────────────────────────────────
-  // Three sub-scores: width ratio + length ratio + width-to-length aspect
-  const noseWidthScore  = clamp(1 - Math.abs(noseRatio - 0.195) * 9, 0, 1);
-  // Nose length ≈ 27% of face height is ideal
-  const noseLengthScore = clamp(1 - Math.abs(g.noseLengthRatio - 0.275) * 11, 0, 1);
-  // Width/length aspect ratio ideal ≈ 0.70–0.80
-  const noseAspectScore = clamp(1 - Math.abs(g.noseAspectRatio - 0.75) * 4, 0, 1);
-  const noseShapeScore  = noseWidthScore * 0.45 + noseLengthScore * 0.30 + noseAspectScore * 0.25;
+  // Nose shape
+  const noseShapeScore = clamp(1 - Math.abs(noseRatio - 0.2) * 6, 0, 1);
 
-  // ── Skin quality ────────────────────────────────────────────────────────────
+  // Skin quality (pixel-based when available, fallback to moderate)
   const skinQualityScore = skinAnalysis ? skinAnalysis.combinedScore : 0.5;
 
-  // ====== Scan quality & confidence (blendshape + head pose) ======
-  // Penalise yaw (face not square-on) and tilt (head roll)
-  const headPoseQuality = clamp(1 - g.headYawOffset * 10 - g.headTiltOffset * 8, 0, 1);
+  // ====== Scan quality & confidence (blendshape-based) ======
   const scanQuality = Math.round(clamp(
-    38 + expressionNeutrality * 32 + symmetryScore * 10 + headPoseQuality * 18,
+    50 + expressionNeutrality * 38 + symmetryScore * 12,
     30, 98
   ));
 
   const confidenceScore = Number(clamp(
-    0.25 + expressionNeutrality * 0.28 + symmetryScore * 0.18 +
-    headPoseQuality * 0.14 + (skinAnalysis ? 0.07 : 0) +
-    (1 - Math.abs(canthalNormalized) * 8) * 0.08,
+    0.30 + expressionNeutrality * 0.35 + symmetryScore * 0.20 +
+    (1 - Math.abs(canthalNormalized) * 10) * 0.08 + (skinAnalysis ? 0.07 : 0),
     0, 0.99
   ).toFixed(2));
 
   // ====== Labels ======
-  const jawline    = scoreToLabel(jawlineStrength,  0.72, 0.48, "Strong & defined", "Moderate", "Can be improved");
-  const cheekbones = scoreToLabel(cheekboneStrength, 0.70, 0.45, "Prominent", "Moderate", "Less defined");
-  const lips       = scoreToLabel(lipScore,          0.70, 0.45, "Well-defined", "Average", "Can be improved");
-  const brows      = scoreToLabel(browDefinition,    0.68, 0.42, "Strong & arched", "Moderate", "Can be improved");
+  const jawline = scoreToLabel(jawlineStrength, 0.7, 0.45, "Strong", "Good", "Can be improved");
+  const cheekbones = scoreToLabel(cheekboneStrength, 0.7, 0.45, "Prominent", "Good", "Can be improved");
+  const lips = scoreToLabel(lipScore, 0.72, 0.45, "Balanced", "Slightly uneven", "Needs improvement");
+  const brows = scoreToLabel(browDefinition, 0.7, 0.4, "Strong", "Moderate", "Can be improved");
 
   let eyeShape = "Neutral canthal tilt";
-  if (canthalNormalized > 0.040) eyeShape = "Strong positive tilt";
-  else if (canthalNormalized > 0.018) eyeShape = "Positive canthal tilt";
-  else if (canthalNormalized < -0.012) eyeShape = "Negative canthal tilt";
+  if (canthalNormalized > 0.018) eyeShape = "Positive canthal tilt";
+  if (canthalNormalized < -0.012) eyeShape = "Negative canthal tilt";
 
   let noseShape = "Proportionate";
-  if (noseRatio > 0.240) noseShape = "Broad relative to face";
-  else if (noseRatio < 0.155) noseShape = "Narrow relative to face";
-  if (g.noseLengthRatio > 0.330) noseShape += " · Long bridge";
-  else if (g.noseLengthRatio < 0.215) noseShape += " · Short bridge";
+  if (noseRatio > 0.245) noseShape = "Broad relative to face";
+  if (noseRatio < 0.16) noseShape = "Narrow relative to face";
 
   let facialSymmetry = "Average";
-  if (symmetryScore >= 0.91) facialSymmetry = "High";
-  else if (symmetryScore >= 0.82) facialSymmetry = "Above average";
-  else if (symmetryScore < 0.65) facialSymmetry = "Can be improved";
+  if (symmetryScore >= 0.82) facialSymmetry = "Above average";
+  if (symmetryScore >= 0.92) facialSymmetry = "High";
+  if (symmetryScore < 0.65) facialSymmetry = "Can be improved";
 
   let puffiness = "Low";
   if (puffinessScore >= 0.55) puffiness = "Noticeable";
@@ -587,20 +545,20 @@ export function generateFacialResults(faceLandmarks, faceBlendshapes, skinAnalys
   if (!skinAnalysis) skinQuality = "Approximate (no pixel data)";
   else if (skinQualityScore >= 0.75) skinQuality = "Clear";
   else if (skinQualityScore >= 0.55) skinQuality = "Good";
-  else if (skinQualityScore < 0.38) skinQuality = "Can be improved";
+  else if (skinQualityScore < 0.40) skinQuality = "Can be improved";
 
-  // ====== Overall score (calibrated weights) ======
+  // ====== Overall score ======
   const overallScoreValue = Math.round(clamp(
-    0.14 * asPercent(jawlineStrength)  +
+    0.13 * asPercent(jawlineStrength) +
     0.13 * asPercent(cheekboneStrength) +
-    0.10 * asPercent(lipScore)         +
-    0.08 * asPercent(browDefinition)   +
-    0.09 * asPercent(eyeShapeScore)    +
-    0.08 * asPercent(noseShapeScore)   +
-    0.16 * asPercent(symmetryScore)    +
-    0.09 * asPercent(puffinessClarity) +
+    0.10 * asPercent(lipScore) +
+    0.08 * asPercent(browDefinition) +
+    0.08 * asPercent(eyeShapeScore) +
+    0.08 * asPercent(noseShapeScore) +
+    0.15 * asPercent(symmetryScore) +
+    0.10 * asPercent(puffinessClarity) +
     0.08 * asPercent(skinQualityScore) +
-    0.05 * scanQuality,
+    0.07 * scanQuality,
     0, 100
   ));
 
