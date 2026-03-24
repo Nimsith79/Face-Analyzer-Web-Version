@@ -2,17 +2,47 @@
 // Licensed under the Apache License, Version 2.0
 
 import vision from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+import { generateFacialResults, analyzeSkinFromPixels } from "./logic.js";
+import { initBiSeNet, isBiSeNetReady, computeSkinMask } from "./skin-analysis.js";
 const { FaceLandmarker, FilesetResolver, DrawingUtils } = vision;
 
 const demosSection = document.getElementById("demos");
 const imageBlendShapes = document.getElementById("image-blend-shapes");
 const videoBlendShapes = document.getElementById("video-blend-shapes");
+const imageAnalysisJson = document.getElementById("image-analysis-json");
+const videoAnalysisJson = document.getElementById("video-analysis-json");
+const imageAnalysisGrid = document.getElementById("image-analysis-grid");
+const videoAnalysisGrid = document.getElementById("video-analysis-grid");
+const compareTaskbar = document.getElementById("compare-taskbar");
+const compareTableWrap = document.getElementById("compare-table-wrap");
+const compareClearButton = document.getElementById("compare-clear");
+
+const SCORE_COMPARE_KEYS = [
+  "jawline",
+  "cheekbones",
+  "lips",
+  "brows",
+  "eyeShape",
+  "noseShape",
+  "facialSymmetry",
+  "puffiness",
+  "skinQuality",
+  "scanQuality",
+  "confidenceScore",
+  "overallScore"
+];
+
+let compareItems = [];
+let compareItemCounter = 0;
+let activeImageCompareId = null;
+let activeImageLabel = "Uploaded Image";
 
 let faceLandmarker;
 let runningMode = "IMAGE";
 let enableWebcamButton;
 let webcamRunning = false;
 const videoWidth = 480;
+let lastVideoAnalysisMs = 0;
 
 // ================= CREATE LANDMARKER =================
 async function createFaceLandmarker() {
@@ -32,10 +62,20 @@ async function createFaceLandmarker() {
   });
 
   demosSection.classList.remove("invisible");
-  document.getElementById('loading-bar').style.display = 'none';
+  const loadingBar = document.getElementById("loading-bar");
+  if (loadingBar) loadingBar.style.display = "none";
 }
 
-createFaceLandmarker();
+async function init() {
+  await createFaceLandmarker();
+  // Try to load BiSeNet face parsing model (optional enhancement)
+  const biSeNetLoaded = await initBiSeNet('./models/face_parsing.onnx');
+  if (!biSeNetLoaded) {
+    console.log('BiSeNet not available — using LBP + patch analysis for skin quality.');
+  }
+}
+
+init();
 
 // ================= MESH SETTINGS =================
 let lastImageResult = null;
@@ -110,9 +150,15 @@ document.querySelectorAll(".layer-check").forEach((cb) => {
 const imageContainer = document.getElementById("imageContainer");
 const imageUpload = document.getElementById("imageUpload");
 
+renderCompareSection();
+
 imageUpload.addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
+
+  compareItemCounter += 1;
+  activeImageCompareId = `cmp-${compareItemCounter}`;
+  activeImageLabel = file.name || `Image ${compareItemCounter}`;
 
   const reader = new FileReader();
   reader.onload = (ev) => {
@@ -157,6 +203,18 @@ async function handleClick(event) {
 
   const result = faceLandmarker.detect(event.target);
 
+  // Extract pixel data for skin analysis
+  const pixelCanvas = document.createElement("canvas");
+  pixelCanvas.width = event.target.naturalWidth;
+  pixelCanvas.height = event.target.naturalHeight;
+  const pixelCtx = pixelCanvas.getContext("2d");
+  pixelCtx.drawImage(event.target, 0, 0, pixelCanvas.width, pixelCanvas.height);
+  const imageData = pixelCtx.getImageData(0, 0, pixelCanvas.width, pixelCanvas.height);
+  const skinMask = isBiSeNetReady()
+    ? await computeSkinMask(imageData, pixelCanvas.width, pixelCanvas.height)
+    : null;
+  const skinAnalysis = analyzeSkinFromPixels(imageData, result.faceLandmarks, pixelCanvas.width, pixelCanvas.height, skinMask);
+
   const canvas = document.createElement("canvas");
   canvas.className = "canvas";
   canvas.width = event.target.naturalWidth;
@@ -181,6 +239,7 @@ async function handleClick(event) {
   lastImageCanvas = canvas;
 
   drawBlendShapes(imageBlendShapes, result.faceBlendshapes);
+  renderGeneratedResult("image", result.faceLandmarks, result.faceBlendshapes, skinAnalysis);
   switchScoreTab('image');
   document.getElementById('image-empty-state').style.display = 'none';
 
@@ -280,6 +339,23 @@ async function predictWebcam() {
 
   drawBlendShapes(videoBlendShapes, results?.faceBlendshapes || []);
 
+  const now = performance.now();
+  if (results?.faceBlendshapes?.length && now - lastVideoAnalysisMs > 250) {
+    lastVideoAnalysisMs = now;
+    // Extract pixel data from video frame for skin analysis
+    const vpcCanvas = document.createElement("canvas");
+    vpcCanvas.width = video.videoWidth;
+    vpcCanvas.height = video.videoHeight;
+    const vpcCtx = vpcCanvas.getContext("2d");
+    vpcCtx.drawImage(video, 0, 0, vpcCanvas.width, vpcCanvas.height);
+    const vpcImageData = vpcCtx.getImageData(0, 0, vpcCanvas.width, vpcCanvas.height);
+    const videoSkinMask = isBiSeNetReady()
+      ? await computeSkinMask(vpcImageData, vpcCanvas.width, vpcCanvas.height)
+      : null;
+    const videoSkinAnalysis = analyzeSkinFromPixels(vpcImageData, results.faceLandmarks, vpcCanvas.width, vpcCanvas.height, videoSkinMask);
+    renderGeneratedResult("video", results.faceLandmarks, results.faceBlendshapes, videoSkinAnalysis);
+  }
+
   if (results?.faceBlendshapes?.length) {
     const emptyEl = document.getElementById('video-empty-state');
     if (emptyEl && emptyEl.style.display !== 'none') {
@@ -314,6 +390,195 @@ function drawBlendShapes(el, blendShapes) {
   });
 
   el.innerHTML = htmlMaker;
+}
+
+function humanizeResultKey(key) {
+  const labels = {
+    jawline: "Jawline",
+    cheekbones: "Cheekbones",
+    lips: "Lips",
+    brows: "Brows",
+    eyeShape: "Eye Shape",
+    noseShape: "Nose Shape",
+    facialSymmetry: "Facial Symmetry",
+    puffiness: "Puffiness",
+    skinQuality: "Skin Quality",
+    scanQuality: "Scan Quality",
+    confidenceScore: "Confidence Score",
+    overallScore: "Overall Score"
+  };
+  return labels[key] || key;
+}
+
+function formatCompareValue(key, value) {
+  if (typeof value !== "number") return "-";
+  if (key === "confidenceScore") return value.toFixed(2);
+  return String(Math.round(value));
+}
+
+function buildScoreOnlyObject(scores) {
+  const cleanScores = {};
+  for (const key of SCORE_COMPARE_KEYS) {
+    cleanScores[key] = typeof scores?.[key] === "number" ? scores[key] : 0;
+  }
+  return cleanScores;
+}
+
+function updateComparisonWithImageScores(scores) {
+  if (!activeImageCompareId || !scores) return;
+
+  const cleanScores = buildScoreOnlyObject(scores);
+  const existingIndex = compareItems.findIndex((item) => item.id === activeImageCompareId);
+
+  if (existingIndex >= 0) {
+    compareItems[existingIndex] = {
+      ...compareItems[existingIndex],
+      scores: cleanScores
+    };
+  } else {
+    compareItems.push({
+      id: activeImageCompareId,
+      label: activeImageLabel,
+      scores: cleanScores,
+      active: true
+    });
+  }
+
+  renderCompareSection();
+}
+
+function toggleCompareItem(id) {
+  compareItems = compareItems.map((item) =>
+    item.id === id ? { ...item, active: !item.active } : item
+  );
+  renderCompareSection();
+}
+
+function renderCompareTaskbar() {
+  if (!compareTaskbar) return;
+
+  if (!compareItems.length) {
+    compareTaskbar.innerHTML = '<p class="compare-empty">Upload 2 or more images to compare their scores.</p>';
+    return;
+  }
+
+  compareTaskbar.innerHTML = compareItems
+    .map((item, index) => `
+      <button type="button" class="compare-task ${item.active ? "active" : ""}" data-compare-id="${item.id}">
+        <span class="compare-task-index">${index + 1}</span>
+        <span class="compare-task-label">${item.label}</span>
+      </button>
+    `)
+    .join("");
+
+  compareTaskbar.querySelectorAll("[data-compare-id]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const id = node.getAttribute("data-compare-id");
+      toggleCompareItem(id);
+    });
+  });
+}
+
+function renderCompareTable() {
+  if (!compareTableWrap) return;
+
+  const activeItems = compareItems.filter((item) => item.active);
+
+  if (activeItems.length < 2) {
+    compareTableWrap.innerHTML = '<p class="compare-empty">Select at least 2 image tasks in the bar to compare score values.</p>';
+    return;
+  }
+
+  const headCells = activeItems
+    .map((item) => `<th>${item.label}</th>`)
+    .join("");
+
+  const rows = SCORE_COMPARE_KEYS
+    .map((key) => {
+      const values = activeItems
+        .map((item) => `<td>${formatCompareValue(key, item.scores[key])}</td>`)
+        .join("");
+      return `
+        <tr>
+          <td class="compare-row-name">${humanizeResultKey(key)}</td>
+          ${values}
+        </tr>
+      `;
+    })
+    .join("");
+
+  compareTableWrap.innerHTML = `
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Score</th>
+          ${headCells}
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderCompareSection() {
+  renderCompareTaskbar();
+  renderCompareTable();
+}
+
+if (compareClearButton) {
+  compareClearButton.addEventListener("click", () => {
+    compareItems = [];
+    compareItemCounter = 0;
+    activeImageCompareId = null;
+    activeImageLabel = "Uploaded Image";
+    renderCompareSection();
+  });
+}
+
+function renderGeneratedResult(mode, faceLandmarks, faceBlendshapes, skinAnalysis) {
+  const data = generateFacialResults(faceLandmarks, faceBlendshapes, skinAnalysis);
+  const jsonEl = mode === "image" ? imageAnalysisJson : videoAnalysisJson;
+  const gridEl = mode === "image" ? imageAnalysisGrid : videoAnalysisGrid;
+
+  if (!jsonEl || !gridEl) return;
+
+  jsonEl.textContent = JSON.stringify(data, null, 2);
+
+  if (mode === "image") {
+    updateComparisonWithImageScores(data.scores);
+  }
+
+  const rows = Object.entries(data.results)
+    .map(([key, value]) => {
+      const score = data.scores?.[key];
+      let displayValue = value;
+      if (typeof value === "number" && key === "confidenceScore") {
+        displayValue = value.toFixed(2);
+      }
+
+      let scoreText = "";
+      if (typeof score === "number") {
+        if (key === "confidenceScore") {
+          scoreText = ` | score ${(score * 100).toFixed(0)}/100`;
+        } else {
+          scoreText = ` | score ${Math.round(score)}/100`;
+        }
+      }
+
+      return `
+        <div class="analysis-row">
+          <span class="analysis-key">${humanizeResultKey(key)}</span>
+          <span class="analysis-value">${displayValue}${scoreText}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  gridEl.innerHTML = `
+    <div class="analysis-rows">${rows}</div>
+  `;
 }
 
 // ================= UI TABS =================

@@ -22,25 +22,25 @@ limitations under the License. -->
   <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
+  <!-- ONNX Runtime Web for BiSeNet face parsing (optional — graceful fallback if unavailable) -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 </head>
 <body>
 
-  <header class="app-header">
-    <div class="app-header-inner">
-      <span class="app-logo">&#129504;</span>
-      <div>
-        <h1 class="app-title">Face Landmarker</h1>
-        <p class="app-subtitle">Real-time face landmark detection powered by MediaPipe</p>
-      </div>
-    </div>
-  </header>
-
-  <div id="loading-bar" class="loading-bar">
-    <div class="loading-bar-fill"></div>
-  </div>
-
   <main>
     <section id="demos" class="invisible">
+      <div class="compare-toolbar panel-card">
+        <div class="compare-toolbar-head">
+          <h3 class="panel-card-title compare-title">Score Comparison Task Bar</h3>
+          <button id="compare-clear" class="compare-clear-btn" type="button">Clear</button>
+        </div>
+        <p class="compare-help">Each uploaded image is added as a task. Comparison uses only score values.</p>
+        <div id="compare-taskbar" class="compare-taskbar">
+          <p class="compare-empty">Upload 2 or more images to compare their scores.</p>
+        </div>
+        <div id="compare-table-wrap" class="compare-table-wrap"></div>
+      </div>
+
       <div class="main-layout">
 
         <!-- ===== LEFT PANEL ===== -->
